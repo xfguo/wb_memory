@@ -42,8 +42,11 @@ module ram_wb_b3(
     // Register to address internal memory array
     reg [(mem_adr_width-adr_width_for_num_word_bytes)-1:0] 
                         adr;
+    reg [(mem_adr_width-adr_width_for_num_word_bytes)-1:0] 
+                        adr_r;
     
     wire [31:0]         wr_data;
+    reg  [dw-1:0]       wb_dat_o_r;
 
     // Register to indicate if the cycle is a Wishbone B3-registered feedback 
     // type access
@@ -79,8 +82,7 @@ module ram_wb_b3(
             wb_b3_trans <= 0;
 
     // Burst address generation logic
-    always @(/*AUTOSENSE*/wb_ack_o or wb_b3_trans or wb_b3_trans_start
-             or wb_bte_i_r or wb_cti_i_r or wb_adr_i or adr)
+    always @*
         if (wb_b3_trans_start)
          // Kick off burst_adr_counter, this assumes 4-byte words when getting
          // address off incoming Wishbone bus address! 
@@ -90,13 +92,13 @@ module ram_wb_b3(
          // Incrementing burst
         begin
             if (wb_bte_i_r == 2'b00) // Linear burst
-               burst_adr_counter = adr + 1;
+               burst_adr_counter = adr_r + 1;
             if (wb_bte_i_r == 2'b01) // 4-beat wrap burst
-               burst_adr_counter[1:0] = adr[1:0] + 1;
+               burst_adr_counter[1:0] = adr_r[1:0] + 1;
             if (wb_bte_i_r == 2'b10) // 8-beat wrap burst
-               burst_adr_counter[2:0] = adr[2:0] + 1;
+               burst_adr_counter[2:0] = adr_r[2:0] + 1;
             if (wb_bte_i_r == 2'b11) // 16-beat wrap burst
-               burst_adr_counter[3:0] = adr[3:0] + 1;
+               burst_adr_counter[3:0] = adr_r[3:0] + 1;
         end // if ((wb_cti_i_r == 3'b010) & wb_ack_o_r)
 
     always @(posedge wb_clk_i)
@@ -109,16 +111,22 @@ module ram_wb_b3(
     assign using_burst_adr = wb_b3_trans;
     
     assign burst_access_wrong_wb_adr = (using_burst_adr & 
-                                       (adr != wb_adr_i[mem_adr_width-1:2]));
+                                       (adr_r != wb_adr_i[mem_adr_width-1:2]));
 
     // Address registering logic
+    always@*
+        if (using_burst_adr)
+            adr = burst_adr_counter;
+        else if (wb_cyc_i & wb_stb_i)
+            adr = wb_adr_i[mem_adr_width-1:2];
+        else
+            adr = adr_r;
+    
     always@(posedge wb_clk_i)
         if(wb_rst_i)
-            adr <= 0;
-        else if (using_burst_adr)
-            adr <= burst_adr_counter;
+            adr_r <= 0;
         else if (wb_cyc_i & wb_stb_i)
-            adr <= wb_adr_i[mem_adr_width-1:2];
+            adr_r <= adr;
 
     /* Memory initialisation.
        If not Verilator model, always do load, otherwise only load when called
@@ -152,13 +160,14 @@ module ram_wb_b3(
     wire ram_we;
     assign ram_we = wb_we_i & wb_ack_o;
 
-    assign wb_dat_o = mem[adr];
-     
     // Write logic
     always @ (posedge wb_clk_i)
         if (ram_we)
-            mem[adr] <= wr_data;
-    
+            mem[adr_r] <= wr_data;
+        else
+            wb_dat_o_r <= mem[adr];
+
+    assign wb_dat_o = wb_dat_o_r;
     // Ack Logic
     reg wb_ack_o_r;
 
