@@ -82,7 +82,7 @@ module ram_wb_b3(
             wb_b3_trans <= 0;
 
     // Burst address generation logic
-    always @*
+    always @* begin
         if (wb_b3_trans_start)
          // Kick off burst_adr_counter, this assumes 4-byte words when getting
          // address off incoming Wishbone bus address! 
@@ -91,6 +91,7 @@ module ram_wb_b3(
         else if ((wb_cti_i_r == 3'b010) & wb_ack_o & wb_b3_trans)
          // Incrementing burst
         begin
+            burst_adr_counter = 0;
             if (wb_bte_i_r == 2'b00) // Linear burst
                burst_adr_counter = adr_r + 1;
             if (wb_bte_i_r == 2'b01) // 4-beat wrap burst
@@ -100,6 +101,7 @@ module ram_wb_b3(
             if (wb_bte_i_r == 2'b11) // 16-beat wrap burst
                burst_adr_counter[3:0] = adr_r[3:0] + 1;
         end // if ((wb_cti_i_r == 3'b010) & wb_ack_o_r)
+    end
 
     always @(posedge wb_clk_i)
         wb_bte_i_r <= wb_bte_i;
@@ -127,26 +129,24 @@ module ram_wb_b3(
             adr_r <= 0;
         else if (wb_cyc_i & wb_stb_i)
             adr_r <= adr;
+        else
+            adr_r <= adr_r;
 
     /* Memory initialisation.
        If not Verilator model, always do load, otherwise only load when called
        from SystemC testbench.
      */
 // synthesis translate_off
-    parameter memory_file = "sram.vmem";
-
-`ifdef verilator
-    task do_readmemh;
-        // verilator public
-        $readmemh(memory_file, mem);
-    endtask // do_readmemh
-`else
-    initial
-      begin
-        $readmemh(memory_file, mem);
-      end
-`endif // !`ifdef verilator
-    
+    integer init_i;
+    initial begin
+        if ($test$plusargs("ram_wb_init")) begin
+            begin
+                for (init_i = 0;init_i < mem_words;init_i=init_i+1) begin
+                    mem[init_i] = 0;
+                end
+            end
+        end
+    end
 //synthesis translate_on
     
     assign wb_rty_o = 0;
@@ -161,11 +161,11 @@ module ram_wb_b3(
     assign ram_we = wb_we_i & wb_ack_o;
 
     // Write logic
-    always @ (posedge wb_clk_i)
+    always @ (posedge wb_clk_i) begin
+        wb_dat_o_r <= mem[adr];
         if (ram_we)
             mem[adr_r] <= wr_data;
-        else
-            wb_dat_o_r <= mem[adr];
+    end
 
     assign wb_dat_o = wb_dat_o_r;
     // Ack Logic
